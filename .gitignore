@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Model artifacts and checkpoints
+*.onnx
+*.tflite
+*.pb
+model_tf/
+model.onnx
+model.tflite
+
+# Logs and temporary files
+logs/
+*.log
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.iml
+
+# OS generated files
+.DS_Store
+Thumbs.db
