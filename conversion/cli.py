@@ -9,6 +9,11 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MODELS_DIR = PROJECT_ROOT / "conversion" / "models"
+DEFAULT_OUTPUT_DIR = Path("output")
+
 TaskFunc = Callable[..., Dict[str, Path]]
 
 
@@ -24,24 +29,31 @@ def _prompt_for_missing_args(args: argparse.Namespace) -> argparse.Namespace:
         print("Select task:")
         print("  1) torch-to-onnx")
         print("  2) onnx-to-tf")
-        print("  3) tf-to-tflite")
-        print("  4) full")
-        choice = _prompt("Enter choice [1-4]: ").strip()
+        print("  3) onnx-to-tflite")
+        print("  4) tf-to-tflite")
+        print("  5) full")
+        choice = _prompt("Enter choice [1-5]: ").strip()
         mapping = {
             "1": "torch-to-onnx",
             "2": "onnx-to-tf",
-            "3": "tf-to-tflite",
-            "4": "full",
+            "3": "onnx-to-tflite",
+            "4": "tf-to-tflite",
+            "5": "full",
         }
         args.task = mapping.get(choice)
         if args.task is None:
             raise SystemExit("Invalid task selection.")
 
     if not args.input_path and args.task != "torch-to-onnx":
-        args.input_path = _prompt("Enter the path to the input model: ").strip()
+        default_hint = DEFAULT_MODELS_DIR
+        args.input_path = _prompt(
+            f"Enter the path to the input model [default directory: {default_hint}]: "
+        ).strip()
 
     if not args.output_dir:
-        args.output_dir = _prompt("Enter the output directory: ").strip()
+        args.output_dir = _prompt(
+            f"Enter the output directory [default: {DEFAULT_OUTPUT_DIR}]: "
+        ).strip() or str(DEFAULT_OUTPUT_DIR)
 
     if args.output_name is None:
         provided = _prompt("Optional output name (leave blank for default): ").strip()
@@ -58,7 +70,7 @@ def _prompt_for_missing_args(args: argparse.Namespace) -> argparse.Namespace:
             ).strip()
         if not args.torch_checkpoint:
             checkpoint = _prompt(
-                "Optional checkpoint path for state_dict (leave blank to skip): "
+                f"Optional checkpoint path for state_dict (searched relative to {DEFAULT_MODELS_DIR}): "
             ).strip()
             args.torch_checkpoint = checkpoint or None
         if not args.input_shape:
@@ -69,13 +81,26 @@ def _prompt_for_missing_args(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
+def _resolve_with_default_dirs(candidate: Path) -> Path:
+    if candidate.exists():
+        return candidate
+
+    if not candidate.is_absolute():
+        fallback = DEFAULT_MODELS_DIR / candidate
+        if fallback.exists():
+            return fallback.resolve()
+
+    return candidate
+
+
 def _ensure_path(path_value: str, must_exist: bool) -> Path:
     if not path_value:
         raise SystemExit("Path value cannot be empty.")
-    path = Path(path_value).expanduser().resolve()
-    if must_exist and not path.exists():
-        raise FileNotFoundError(f"Path not found: {path}")
-    return path
+    raw_path = Path(path_value).expanduser()
+    resolved = _resolve_with_default_dirs(raw_path)
+    if must_exist and not resolved.exists():
+        raise FileNotFoundError(f"Path not found: {resolved}")
+    return resolved.resolve()
 
 
 def _parse_shape(shape_str: str) -> Tuple[int, ...]:
@@ -110,8 +135,10 @@ def convert_torch_to_onnx(
     if torch_checkpoint is None and input_path and input_path.is_file():
         torch_checkpoint = input_path
 
-    if torch_checkpoint is not None and not torch_checkpoint.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {torch_checkpoint}")
+    if torch_checkpoint is not None:
+        torch_checkpoint = _resolve_with_default_dirs(torch_checkpoint)
+        if not torch_checkpoint.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {torch_checkpoint}")
 
     module = importlib.import_module(torch_module)
     try:
@@ -119,7 +146,7 @@ def convert_torch_to_onnx(
     except AttributeError as exc:
         raise SystemExit(f"Class '{torch_class}' not found in module '{torch_module}'.") from exc
 
-    import torch
+    import torch  # type: ignore[import-not-found]
 
     model = model_cls()
     if torch_checkpoint is not None:
@@ -225,6 +252,34 @@ def convert_tf_to_tflite(
     return {"tflite_model": tflite_path}
 
 
+def convert_onnx_to_tflite(
+    input_path: Path,
+    output_dir: Path,
+    output_name: Optional[str] = None,
+    overwrite: bool = False,
+    **kwargs: object,
+) -> Dict[str, Path]:
+    """Convert an ONNX model directly into TFLite with an intermediate TF export."""
+    base_name = output_name or input_path.stem
+
+    tf_results = convert_onnx_to_tf(
+        input_path=input_path,
+        output_dir=output_dir,
+        output_name=base_name + "_tf",
+        overwrite=overwrite,
+    )
+    tf_dir = tf_results["tf_model_dir"]
+
+    tflite_results = convert_tf_to_tflite(
+        input_path=tf_dir,
+        output_dir=output_dir,
+        output_name=base_name,
+        overwrite=overwrite,
+    )
+
+    return {**tf_results, **tflite_results}
+
+
 def run_full_pipeline(
     input_path: Path,
     output_dir: Path,
@@ -259,6 +314,7 @@ def run_full_pipeline(
 TASKS: Dict[str, TaskFunc] = {
     "torch-to-onnx": convert_torch_to_onnx,
     "onnx-to-tf": convert_onnx_to_tf,
+    "onnx-to-tflite": convert_onnx_to_tflite,
     "tf-to-tflite": convert_tf_to_tflite,
     "full": run_full_pipeline,
 }
@@ -281,6 +337,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         dest="output_dir",
+        default=str(DEFAULT_OUTPUT_DIR),
         help="Directory where outputs will be written.",
     )
     parser.add_argument(

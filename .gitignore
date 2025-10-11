@@ -19,6 +19,7 @@ env/
 *.caffemodel
 *.prototxt
 model_tf/
+output/
 model.onnx
 model.tflite
 
