@@ -12,6 +12,12 @@ env/
 *.onnx
 *.tflite
 *.pb
+*.pt
+*.pth
+*.pth.tar
+*.ckpt
+*.caffemodel
+*.prototxt
 model_tf/
 model.onnx
 model.tflite
