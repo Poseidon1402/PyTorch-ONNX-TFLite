@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-tflite_model_path = 'model.tflite'
+tflite_model_path = 'output/face_detection.tflite'
 # Load the TFLite model and allocate tensors
 interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
 interpreter.allocate_tensors()
